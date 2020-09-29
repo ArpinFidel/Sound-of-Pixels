@@ -33,9 +33,12 @@ if __name__ == '__main__':
     for audio_path in audio_files:
         frame_path = audio_path.replace(args.root_audio, args.root_frame) \
                                .replace('.mp3', '.mp4')
-        frame_files = glob.glob(frame_path + '/*.jpg')
+        print(frame_path)
+        frame_files = ["/.data/frames/videoplayback.mp4/%06d"%(i+1) for i in range(1593)]
+        print(frame_files)
         if len(frame_files) > args.fps * 20:
             infos.append(','.join([audio_path, frame_path, str(len(frame_files))]))
+        print(infos)
     print('{} audio/frames pairs found.'.format(len(infos)))
 
     # split train/val

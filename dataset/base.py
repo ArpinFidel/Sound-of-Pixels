@@ -12,7 +12,7 @@ from . import video_transforms as vtransforms
 
 
 class BaseDataset(torchdata.Dataset):
-    def __init__(self, list_sample, opt, max_sample=-1, split='train'):
+    def __init__(self, list_sample, opt, max_sample=-1, split='eval'):
         # params
         self.num_frames = opt.num_frames
         self.stride_frames = opt.stride_frames
@@ -37,6 +37,7 @@ class BaseDataset(torchdata.Dataset):
         # initialize video transform
         self._init_vtransform()
 
+        print(list_sample)
         # list_sample can be a python list or a csv file of list
         if isinstance(list_sample, str):
             # self.list_sample = [x.rstrip() for x in open(list_sample, 'r')]

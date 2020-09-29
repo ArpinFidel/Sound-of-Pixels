@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import scipy.io.wavfile as wavfile
-from scipy.misc import imsave
+from keras.preprocessing.image import save_img
 from mir_eval.separation import bss_eval_sources
 
 # Our libs
@@ -231,8 +231,8 @@ def output_visuals(vis_rows, batch_data, outputs, args):
         filename_mixwav = os.path.join(prefix, 'mix.wav')
         filename_mixmag = os.path.join(prefix, 'mix.jpg')
         filename_weight = os.path.join(prefix, 'weight.jpg')
-        imsave(os.path.join(args.vis, filename_mixmag), mix_amp[::-1, :, :])
-        imsave(os.path.join(args.vis, filename_weight), weight[::-1, :])
+        save_img(os.path.join(args.vis, filename_mixmag), mix_amp[::-1, :, :])
+        save_img(os.path.join(args.vis, filename_weight), weight[::-1, :])
         wavfile.write(os.path.join(args.vis, filename_mixwav), args.audRate, mix_wav)
         row_elements += [{'text': prefix}, {'image': filename_mixmag, 'audio': filename_mixwav}]
 
@@ -250,16 +250,16 @@ def output_visuals(vis_rows, batch_data, outputs, args):
             filename_predmask = os.path.join(prefix, 'predmask{}.jpg'.format(n+1))
             gt_mask = (np.clip(gt_masks_[n][j, 0], 0, 1) * 255).astype(np.uint8)
             pred_mask = (np.clip(pred_masks_[n][j, 0], 0, 1) * 255).astype(np.uint8)
-            imsave(os.path.join(args.vis, filename_gtmask), gt_mask[::-1, :])
-            imsave(os.path.join(args.vis, filename_predmask), pred_mask[::-1, :])
+            save_img(os.path.join(args.vis, filename_gtmask), gt_mask[::-1, :])
+            save_img(os.path.join(args.vis, filename_predmask), pred_mask[::-1, :])
 
             # ouput spectrogram (log of magnitude, show colormap)
             filename_gtmag = os.path.join(prefix, 'gtamp{}.jpg'.format(n+1))
             filename_predmag = os.path.join(prefix, 'predamp{}.jpg'.format(n+1))
             gt_mag = magnitude2heatmap(gt_mag)
             pred_mag = magnitude2heatmap(pred_mag)
-            imsave(os.path.join(args.vis, filename_gtmag), gt_mag[::-1, :, :])
-            imsave(os.path.join(args.vis, filename_predmag), pred_mag[::-1, :, :])
+            save_img(os.path.join(args.vis, filename_gtmag), gt_mag[::-1, :, :])
+            save_img(os.path.join(args.vis, filename_predmag), pred_mag[::-1, :, :])
 
             # output audio
             filename_gtwav = os.path.join(prefix, 'gt{}.wav'.format(n+1))
@@ -363,93 +363,6 @@ def evaluate(netWrapper, loader, history, epoch, args):
         plot_loss_metrics(args.ckpt, history)
 
 
-# train one epoch
-def train(netWrapper, loader, optimizer, history, epoch, args):
-    torch.set_grad_enabled(True)
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    # switch to train mode
-    netWrapper.train()
-
-    # main loop
-    torch.cuda.synchronize()
-    tic = time.perf_counter()
-    for i, batch_data in enumerate(loader):
-        # measure data time
-        torch.cuda.synchronize()
-        data_time.update(time.perf_counter() - tic)
-
-        # forward pass
-        netWrapper.zero_grad()
-        err, _ = netWrapper.forward(batch_data, args)
-        err = err.mean()
-
-        # backward
-        err.backward()
-        optimizer.step()
-
-        # measure total time
-        torch.cuda.synchronize()
-        batch_time.update(time.perf_counter() - tic)
-        tic = time.perf_counter()
-
-        # display
-        if i % args.disp_iter == 0:
-            print('Epoch: [{}][{}/{}], Time: {:.2f}, Data: {:.2f}, '
-                  'lr_sound: {}, lr_frame: {}, lr_synthesizer: {}, '
-                  'loss: {:.4f}'
-                  .format(epoch, i, args.epoch_iters,
-                          batch_time.average(), data_time.average(),
-                          args.lr_sound, args.lr_frame, args.lr_synthesizer,
-                          err.item()))
-            fractional_epoch = epoch - 1 + 1. * i / args.epoch_iters
-            history['train']['epoch'].append(fractional_epoch)
-            history['train']['err'].append(err.item())
-
-
-def checkpoint(nets, history, epoch, args):
-    print('Saving checkpoints at {} epochs.'.format(epoch))
-    (net_sound, net_frame, net_synthesizer) = nets
-    suffix_latest = 'latest.pth'
-    suffix_best = 'best.pth'
-
-    torch.save(history,
-               '{}/history_{}'.format(args.ckpt, suffix_latest))
-    torch.save(net_sound.state_dict(),
-               '{}/sound_{}'.format(args.ckpt, suffix_latest))
-    torch.save(net_frame.state_dict(),
-               '{}/frame_{}'.format(args.ckpt, suffix_latest))
-    torch.save(net_synthesizer.state_dict(),
-               '{}/synthesizer_{}'.format(args.ckpt, suffix_latest))
-
-    cur_err = history['val']['err'][-1]
-    if cur_err < args.best_err:
-        args.best_err = cur_err
-        torch.save(net_sound.state_dict(),
-                   '{}/sound_{}'.format(args.ckpt, suffix_best))
-        torch.save(net_frame.state_dict(),
-                   '{}/frame_{}'.format(args.ckpt, suffix_best))
-        torch.save(net_synthesizer.state_dict(),
-                   '{}/synthesizer_{}'.format(args.ckpt, suffix_best))
-
-
-def create_optimizer(nets, args):
-    (net_sound, net_frame, net_synthesizer) = nets
-    param_groups = [{'params': net_sound.parameters(), 'lr': args.lr_sound},
-                    {'params': net_synthesizer.parameters(), 'lr': args.lr_synthesizer},
-                    {'params': net_frame.features.parameters(), 'lr': args.lr_frame},
-                    {'params': net_frame.fc.parameters(), 'lr': args.lr_sound}]
-    return torch.optim.SGD(param_groups, momentum=args.beta1, weight_decay=args.weight_decay)
-
-
-def adjust_learning_rate(optimizer, args):
-    args.lr_sound *= 0.1
-    args.lr_frame *= 0.1
-    args.lr_synthesizer *= 0.1
-    for param_group in optimizer.param_groups:
-        param_group['lr'] *= 0.1
-
-
 def main(args):
     # Network Builders
     builder = ModelBuilder()
@@ -470,25 +383,25 @@ def main(args):
     crit = builder.build_criterion(arch=args.loss)
 
     # Dataset and Loader
-    dataset_train = MUSICMixDataset(
-        args.list_train, args, split='train')
+    # dataset_train = MUSICMixDataset(
+    #     args.list_train, args, split='train')
     dataset_val = MUSICMixDataset(
         args.list_val, args, max_sample=args.num_val, split='val')
 
-    loader_train = torch.utils.data.DataLoader(
-        dataset_train,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=int(args.workers),
-        drop_last=True)
+    # loader_train = torch.utils.data.DataLoader(
+    #     dataset_train,
+    #     batch_size=args.batch_size,
+    #     shuffle=True,
+    #     num_workers=int(args.workers),
+    #     drop_last=True)
     loader_val = torch.utils.data.DataLoader(
         dataset_val,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=2,
         drop_last=False)
-    args.epoch_iters = len(dataset_train) // args.batch_size
-    print('1 Epoch = {} iters'.format(args.epoch_iters))
+    # args.epoch_iters = len(dataset_train) // args.batch_size
+    # print('1 Epoch = {} iters'.format(args.epoch_iters))
 
     # Wrap networks
     netWrapper = NetWrapper(nets, crit)
@@ -510,21 +423,21 @@ def main(args):
         return
 
     # Training loop
-    for epoch in range(1, args.num_epoch + 1):
-        train(netWrapper, loader_train, optimizer, history, epoch, args)
+    # for epoch in range(1, args.num_epoch + 1):
+    #     train(netWrapper, loader_train, optimizer, history, epoch, args)
 
-        # Evaluation and visualization
-        if epoch % args.eval_epoch == 0:
-            evaluate(netWrapper, loader_val, history, epoch, args)
+    #     # Evaluation and visualization
+    #     if epoch % args.eval_epoch == 0:
+    #         evaluate(netWrapper, loader_val, history, epoch, args)
 
-            # checkpointing
-            checkpoint(nets, history, epoch, args)
+    #         # checkpointing
+    #         checkpoint(nets, history, epoch, args)
 
-        # drop learning rate
-        if epoch in args.lr_steps:
-            adjust_learning_rate(optimizer, args)
+    #     # drop learning rate
+    #     if epoch in args.lr_steps:
+    #         adjust_learning_rate(optimizer, args)
 
-    print('Training Done!')
+    # print('Training Done!')
 
 
 if __name__ == '__main__':
